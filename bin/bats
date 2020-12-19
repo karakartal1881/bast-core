@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BATS_READLINK='true'
+BATS_REALPATH=''
+if command -v 'greadlink' >/dev/null; then
+  BATS_READLINK='greadlink'
+elif command -v 'readlink' >/dev/null; then
+  BATS_READLINK='readlink'
+fi
+
+if ! "${BATS_READLINK}" -m "$0" &>/dev/null; then
+  BATS_REALPATH='realpath'
+fi
+
+resolve_path() {
+  local path_to_bats=$1
+  local target_path
+
+  if [[ -L "${path_to_bats}" ]]; then
+    # Busybox has no readlink from coreutils
+    if [[ -n "$BATS_REALPATH" ]]; then
+      target_path="$("$BATS_REALPATH" "$path_to_bats")"
+      # we need to traverse the paths
+      target_path="$(dirname "$target_path")" # strip bats
+      target_path="$(dirname "$target_path")" # strip bin
+    else
+      target_path="$("$BATS_READLINK" -m "$path_to_bats/../../")"
+    fi
+  elif [[ -f "${path_to_bats}" ]]; then
+    target_path=$(dirname "$path_to_bats")
+    if [[ -n "$BATS_REALPATH" ]]; then
+      target_path="$("$BATS_REALPATH" "$target_path")"
+    else
+      target_path="$("$BATS_READLINK" -m "$target_path")"
+    fi
+    target_path="$(dirname "$target_path")" # strip bin
+  elif [[ -d "${path_to_bats}" ]]; then
+    if [[ -n "$BATS_REALPATH" ]]; then
+      target_path="$("$BATS_REALPATH" "$path_to_bats")"
+      target_path="$(dirname "$target_path")"
+    else
+      target_path="$("$BATS_READLINK" -m "$path_to_bats/../")"
+    fi
+  fi
+
+  echo "$target_path"
+}
+
+bats_resolve_absolute_root_dir() {
+  local path_to_bats="$1"
+  local result="$2"
+  local target_path
+
+  if [[ "$path_to_bats" == "$(basename "${path_to_bats}")" ]]; then
+    path_to_bats=$(type -p "$path_to_bats")
+  fi
+
+  target_path=$(resolve_path "${path_to_bats}")
+  if [[ "$target_path" == '.' ]]; then
+    target_path="$(resolve_path "$target_path")"
+  fi
+  printf -v "$result" -- '%s' "$target_path"
+}
+
+export BATS_ROOT
+bats_resolve_absolute_root_dir "$0" 'BATS_ROOT'
+exec env BATS_ROOT="$BATS_ROOT" "$BATS_ROOT/libexec/bats-core/bats" "$@"
